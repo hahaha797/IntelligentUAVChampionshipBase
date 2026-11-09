@@ -30,38 +30,40 @@ int main(int argc, char** argv)
     g_Camera_Distor_r << -0.00567839, 0.01405329, 0.00025239, -0.00037066;
     g_map_manager.setCamParameter(g_Camera_Trl, g_Camera_Intrinsic_l, g_Camera_Intrinsic_r, g_Camera_Distor_l, g_Camera_Distor_r);
     g_map_manager.startOptimal();
-    ros::init(argc, argv, "odometry"); // 初始化ros 节点，命名为 basic
-    ros::NodeHandle n; // 创建node控制句柄
-    image_transport::ImageTransport it(n); //创建图像传输控制句柄
+    rclcpp::init(argc, argv);
+    auto n = std::make_shared<rclcpp::Node>("odometry");
 
-    g_img_publisher = n.advertise<sensor_msgs::Image>("/display_image", 1000);
-    g_cur_pcl_publisher = n.advertise<sensor_msgs::PointCloud2>("/cur_frame_pcl", 1000);
-    g_local_map_pcl_publisher = n.advertise<sensor_msgs::PointCloud2>("/local_map_pcl", 1000);
+
+    g_img_publisher = n->create_publisher<sensor_msgs::msg::Image>("/display_image", 10);
+    g_cur_pcl_publisher = n->create_publisher<sensor_msgs::msg::PointCloud2>("/cur_frame_pcl", 10);
+    g_local_map_pcl_publisher = n->create_publisher<sensor_msgs::msg::PointCloud2>("/local_map_pcl", 10);
     //无人机信息通过如下命令订阅，当收到消息时自动回调对应的函数
-    ros::Subscriber odom_suber = n.subscribe<geometry_msgs::PoseStamped>("/airsim_node/drone_1/pose", 1, odom_local_ned_cb);//状态真值，用于赛道一
-    ros::Subscriber imu_suber = n.subscribe<sensor_msgs::Imu>("airsim_node/drone_1/imu/imu", 1, imu_cb);//imu数据
-    message_filters::Subscriber<sensor_msgs::Image> fl_image_suber(n, "airsim_node/drone_1/front_left/Scene", 1);
-    message_filters::Subscriber<sensor_msgs::Image> fr_image_suber(n, "airsim_node/drone_1/front_right/Scene", 1);
-    message_filters::Synchronizer<message_filters::sync_policies::ExactTime<sensor_msgs::Image, sensor_msgs::Image>> 
-        sync_handler(message_filters::sync_policies::ExactTime<sensor_msgs::Image, sensor_msgs::Image>(10), fl_image_suber, fr_image_suber);
+    auto odom_suber = n->create_subscription<geometry_msgs::msg::PoseStamped>("/airsim_node/drone_1/gps", rclcpp::SensorDataQoS(), odom_local_ned_cb);//状态真值，用于赛道一
+    auto imu_suber = n->create_subscription<sensor_msgs::msg::Imu>("airsim_node/drone_1/imu/imu", rclcpp::SensorDataQoS(), imu_cb);//imu数据
+    const auto image_qos = rclcpp::QoS(2).reliable().get_rmw_qos_profile();
+    message_filters::Subscriber<sensor_msgs::msg::Image> fl_image_suber(n.get(), "/airsim_node/drone_1/front_left/Scene", image_qos);
+    message_filters::Subscriber<sensor_msgs::msg::Image> fr_image_suber(n.get(), "/airsim_node/drone_1/front_right/Scene", image_qos);
+    message_filters::Synchronizer<message_filters::sync_policies::ExactTime<sensor_msgs::msg::Image, sensor_msgs::msg::Image>>
+        sync_handler(message_filters::sync_policies::ExactTime<sensor_msgs::msg::Image, sensor_msgs::msg::Image>(10), fl_image_suber, fr_image_suber);
     sync_handler.registerCallback(std::bind(front_stereo_view_cb, std::placeholders::_1, std::placeholders::_2));
-    ros::Rate loop_rate(100);
-    while(ros::ok()){
-        ros::spinOnce();
-        loop_rate.sleep();
-    }
+    auto backend_timer = n->create_wall_timer(std::chrono::milliseconds(200), [] { g_map_manager.optimizeWindow(); });
+    rclcpp::spin(n);
+    g_img_publisher.reset();
+    g_cur_pcl_publisher.reset();
+    g_local_map_pcl_publisher.reset();
+    rclcpp::shutdown();
     return 0;
 }
 
-void odom_local_ned_cb(const geometry_msgs::PoseStamped::ConstPtr& msg)
+void odom_local_ned_cb(const geometry_msgs::msg::PoseStamped::ConstSharedPtr& msg)
 {
     Eigen::Vector3d p(msg->pose.position.x, msg->pose.position.y,msg->pose.position.z);
-    g_map_manager.updateUsefulRTFrame(p, msg->header.stamp.toNSec());
+    g_map_manager.updateUsefulRTFrame(p, rclcpp::Time(msg->header.stamp).nanoseconds());
 }
 
-void imu_cb(const sensor_msgs::Imu::ConstPtr& msg)
+void imu_cb(const sensor_msgs::msg::Imu::ConstSharedPtr& msg)
 {
-    // ROS_INFO("Get imu data.\n %f %f %f \n %f %f %f", msg->angular_velocity.x, msg->angular_velocity.y,
+    // RCLCPP_INFO(rclcpp::get_logger("odometry"), "Get imu data.\n %f %f %f \n %f %f %f", msg->angular_velocity.x, msg->angular_velocity.y,
     // msg->angular_velocity.z, msg->linear_acceleration.x, msg->linear_acceleration.y, msg->linear_acceleration.z);
     double sample = gauss_dist(gen);
     imudata.imu_acc[0] = msg->linear_acceleration.x + imudata.acc_n_d*sample + (imudata.acc_w_d*sample + imudata.last_acc_w_d);
@@ -80,8 +82,8 @@ void imu_cb(const sensor_msgs::Imu::ConstPtr& msg)
     0.0, -imudata.phi[2], imudata.phi[1], 
     imudata.phi[2], 0.0, -imudata.phi[0],
     -imudata.phi[1], imudata.phi[0], 0.0;
-    imudata.R_i0_i1 = Eigen::Matrix3d::Identity() + sinf64(phi_norm)/phi_norm * 
-            skew_sym_m_phi + (1-cosf64(phi_norm))/(phi_norm*phi_norm)*skew_sym_m_phi*skew_sym_m_phi;
+    imudata.R_i0_i1 = Eigen::Matrix3d::Identity() + (phi_norm < 1e-8 ? 1.0 : std::sin(phi_norm)/phi_norm) *
+            skew_sym_m_phi + (phi_norm < 1e-8 ? 0.5 : (1-std::cos(phi_norm))/(phi_norm*phi_norm))*skew_sym_m_phi*skew_sym_m_phi;
     imudata.R_w_i = imudata.R_w_i * imudata.R_i0_i1;
     imudata.speed = imudata.last_speed + ((imudata.R_w_i*imudata.imu_acc+imudata.last_R_w_i*imudata.last_acc) / 2.0 + imudata.gravity_vec)*imudata.imu_delta_t;
     imudata.pos = imudata.last_pos + imudata.last_speed*imudata.imu_delta_t+ 0.5*imudata.imu_delta_t * imudata.imu_delta_t * ((imudata.R_w_i*imudata.imu_acc+imudata.last_R_w_i*imudata.last_acc) / 2.0 + imudata.gravity_vec); 
@@ -104,8 +106,8 @@ void imu_cb(const sensor_msgs::Imu::ConstPtr& msg)
     0.0, -imudata_seg.phi[2], imudata_seg.phi[1], 
     imudata_seg.phi[2], 0.0, -imudata_seg.phi[0],
     -imudata_seg.phi[1], imudata_seg.phi[0], 0.0;
-    imudata_seg.R_i0_i1 = Eigen::Matrix3d::Identity() + sinf64(phi_norm_seg)/phi_norm_seg * 
-            skew_sym_m_phi_seg + (1-cosf64(phi_norm_seg))/(phi_norm_seg*phi_norm_seg)*skew_sym_m_phi_seg*skew_sym_m_phi_seg;
+    imudata_seg.R_i0_i1 = Eigen::Matrix3d::Identity() + (phi_norm_seg < 1e-8 ? 1.0 : std::sin(phi_norm_seg)/phi_norm_seg) *
+            skew_sym_m_phi_seg + (phi_norm_seg < 1e-8 ? 0.5 : (1-std::cos(phi_norm_seg))/(phi_norm_seg*phi_norm_seg))*skew_sym_m_phi_seg*skew_sym_m_phi_seg;
     imudata_seg.R_w_i = imudata_seg.R_w_i * imudata_seg.R_i0_i1;
     imudata_seg.R_i0_i1_sum = imudata_seg.R_i0_i1_sum * imudata_seg.R_i0_i1;
     imudata_seg.speed = imudata_seg.last_speed + ((imudata_seg.R_w_i*imudata_seg.imu_acc+imudata_seg.last_R_w_i*imudata_seg.last_acc) / 2.0 + imudata_seg.gravity_vec)*imudata_seg.imu_delta_t;
@@ -118,22 +120,22 @@ void imu_cb(const sensor_msgs::Imu::ConstPtr& msg)
 
 
     imudata_seg.imu_mtx.unlock();
-    if(msg->header.stamp.sec == 0 || msg->header.stamp.nsec==0)
+    if(msg->header.stamp.sec == 0 && msg->header.stamp.nanosec==0)
     {
         std::cout<<"error, get 0 time stamp."<<std::endl;
         exit(0);
     }
 }
 
-void front_left_view_cb(const sensor_msgs::ImageConstPtr& msg)
+void front_left_view_cb(const sensor_msgs::msg::Image::ConstSharedPtr& msg)
 {
-    ROS_INFO("Get fl view image\n height: %d\n weight: %d\n size: %ld",
+    RCLCPP_INFO(rclcpp::get_logger("odometry"), "Get fl view image\n height: %d\n weight: %d\n size: %ld",
     msg->height, msg->width, msg->data.size());//图像高度宽度以及数据大小， size = height*weight*3 (8bit3通道)
 }
 
-void front_right_view_cb(const sensor_msgs::ImageConstPtr& msg)
+void front_right_view_cb(const sensor_msgs::msg::Image::ConstSharedPtr& msg)
 {
-    ROS_INFO("Get fr view image\n height: %d\n weight: %d\n size: %ld",
+    RCLCPP_INFO(rclcpp::get_logger("odometry"), "Get fr view image\n height: %d\n weight: %d\n size: %ld",
     msg->height, msg->width, msg->data.size());//图像高度宽度以及数据大小， size = height*weight*3 (8bit3通道)
 }
 
@@ -162,10 +164,11 @@ void estimatePoseOnly(Eigen::Matrix4d& origin_T_c1c0, Eigen::Matrix4d& opt_T_c1c
             g_map_manager.curKeyFrame().m_kf_feats_l[kf_idx].is_outlier = true;
         }
     }
+    if (cam0_frame_points.size() < 4) { opt_T_c1c0 = origin_T_c1c0; return; }
     g2o::SparseOptimizer optimizer;
     g2o::OptimizationAlgorithmLevenberg* solver = nullptr;
     solver = new g2o::OptimizationAlgorithmLevenberg(
-        std::make_unique<g2o::BlockSolver_6_3>(std::make_unique<g2o::LinearSolverCholmod<g2o::BlockSolver_6_3::PoseMatrixType>>()));
+        std::make_unique<g2o::BlockSolver_6_3>(std::make_unique<g2o::LinearSolverEigen<g2o::BlockSolver_6_3::PoseMatrixType>>()));
     optimizer.setAlgorithm(solver);
     optimizer.setVerbose(false);
     g2o::CameraParameters* camera = new g2o::CameraParameters( 
@@ -270,7 +273,7 @@ void imuSegUpdate(Eigen::Vector3d& last_opt_speed, Eigen::Matrix4d& T_last_cur)
     imudata_seg.imu_mtx.unlock();
 }
 
-void front_stereo_view_cb(const sensor_msgs::ImageConstPtr& fl_img_msg, const sensor_msgs::ImageConstPtr& fr_img_msg)
+void front_stereo_view_cb(const sensor_msgs::msg::Image::ConstSharedPtr& fl_img_msg, const sensor_msgs::msg::Image::ConstSharedPtr& fr_img_msg)
 {
     auto t_a = std::chrono::high_resolution_clock::now();
     try
@@ -283,7 +286,7 @@ void front_stereo_view_cb(const sensor_msgs::ImageConstPtr& fl_img_msg, const se
 
         if(!g_initial)
         {
-            KeyFrame kf(img_l_gray, img_r_gray, cv_ptrl->image, cv_ptrl->header.stamp.toNSec());
+            KeyFrame kf(img_l_gray, img_r_gray, cv_ptrl->image, rclcpp::Time(cv_ptrl->header.stamp).nanoseconds());
             g_map_manager.insertKF(kf);
             std::vector<cv::Mat> imgs;
             imgs.emplace_back(g_map_manager.curKeyFrame().m_img_l_bgr);
@@ -305,9 +308,9 @@ void front_stereo_view_cb(const sensor_msgs::ImageConstPtr& fl_img_msg, const se
                 cv::circle(kf_h_image,pl, 5.0, cv::Scalar(0, 0, 255), 2.5);
             }
             cv::resize(kf_h_image, kf_h_image, cv::Size(1920*0.75, 720*0.75));
-            sensor_msgs::ImagePtr cv_hconate_msg = cv_bridge::CvImage(std_msgs::Header(), "bgr8", kf_h_image).toImageMsg();
+            sensor_msgs::msg::Image::SharedPtr cv_hconate_msg = cv_bridge::CvImage(std_msgs::msg::Header(), "bgr8", kf_h_image).toImageMsg();
             cv_hconate_msg->header = fl_img_msg->header;
-            g_img_publisher.publish(cv_hconate_msg);
+            g_img_publisher->publish(*cv_hconate_msg);
             g_initial = true;
             // exit(0);
             // std::cout<<"gmap vec inittial : "<<g_map_manager.curKeyFrame().m_RT_Vec.transpose()<<std::endl;
@@ -407,18 +410,18 @@ void front_stereo_view_cb(const sensor_msgs::ImageConstPtr& fl_img_msg, const se
                         cur_matched_pt_corespond_kf_pt_idxs[i]);
             }
             // std::cout<<std::endl;
-            sensor_msgs::ImagePtr cv_vconate_msg = cv_bridge::CvImage(std_msgs::Header(), "bgr8", v_image).toImageMsg();
+            sensor_msgs::msg::Image::SharedPtr cv_vconate_msg = cv_bridge::CvImage(std_msgs::msg::Header(), "bgr8", v_image).toImageMsg();
             cv_vconate_msg->header = fl_img_msg->header;
-            g_img_publisher.publish(cv_vconate_msg);
-            sensor_msgs::PointCloud2 cur_frame_pcl_msg;
+            g_img_publisher->publish(*cv_vconate_msg);
+            sensor_msgs::msg::PointCloud2 cur_frame_pcl_msg;
             pcl::toROSMsg(g_map_manager.m_global_PCL, cur_frame_pcl_msg);
             cur_frame_pcl_msg.header = fl_img_msg->header;
             cur_frame_pcl_msg.header.frame_id = "odometry";
-            g_local_map_pcl_publisher.publish(cur_frame_pcl_msg);
+            g_local_map_pcl_publisher->publish(cur_frame_pcl_msg);
             if(closeP3dMatchCnt < 30 || max_x - min_x < 480 || max_y - min_y < 360)
             {
                 std::cout<<"Match "<<cur_RT_feats.size()<<" feats to kf, insert new kf.\n";
-                KeyFrame kf(img_l_gray, img_r_gray, cv_ptrl->image, cur_RT_feats, g_map_manager.curKeyFrame(), cv_ptrl->header.stamp.toNSec());
+                KeyFrame kf(img_l_gray, img_r_gray, cv_ptrl->image, cur_RT_feats, g_map_manager.curKeyFrame(), rclcpp::Time(cv_ptrl->header.stamp).nanoseconds());
                 std::cout<<"Last kf Tc0ckf:\n"<<g_map_manager.curKeyFrame().m_Tc0ccur<<std::endl;
                 Eigen::Matrix4d opt_Tccurckf, opt_Tckfccur;
                 estimatePoseOnly(Tcrtckf_predict, opt_Tccurckf, cur_RT_feats);
@@ -455,7 +458,7 @@ void front_stereo_view_cb(const sensor_msgs::ImageConstPtr& fl_img_msg, const se
     }
     catch(const std::exception& e)
     {
-        ROS_ERROR("cv_bridge exception %s", e.what());
+        RCLCPP_ERROR(rclcpp::get_logger("odometry"), "cv_bridge exception %s", e.what());
     }
     auto t_b = std::chrono::high_resolution_clock::now();
     std::cout<<"odom:"<< std::chrono::duration_cast<std::chrono::milliseconds>(t_b-t_a).count()<<"ms"<<std::endl;

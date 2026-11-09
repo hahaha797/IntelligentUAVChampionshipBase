@@ -1,50 +1,43 @@
-cmake_minimum_required(VERSION 3.0.2)
+cmake_minimum_required(VERSION 3.16)
 project(odometry)
 set(CMAKE_CXX_STANDARD 17)
-## Compile as C++11, supported in ROS Kinetic and newer
-# add_compile_options(-std=c++11)
-
-## Find catkin macros and libraries
-## if COMPONENTS list like find_package(catkin REQUIRED COMPONENTS xyz)
-## is used, also find other catkin packages
-set(cv_bridge_DIR /usr/local/share/cv_bridge/cmake)
-set(pcl_conversions_DIR /usr/local/share/pcl_conversions/cmake)
-set(pcl_ros_DIR /usr/local/share/pcl_ros/cmake)
-find_package(catkin REQUIRED COMPONENTS
-airsim_ros
-message_generation
-nav_msgs
-roscpp
-rospy
-sensor_msgs
-std_msgs
-geographic_msgs
-geometry_msgs
-std_srvs
-tf2
-tf2_ros
-tf2_sensor_msgs
-tf2_geometry_msgs
-image_transport
-cv_bridge
-pcl_conversions
-pcl_ros
-)
-
-find_package(OpenCV 4.10.0 EXACT)
-find_package(g2o REQUIRED)
-
-catkin_package(
-  CATKIN_DEPENDS message_runtime roscpp std_msgs
-)
-
-set(UTILS_PATH ${PROJECT_SOURCE_DIR}/../utils)
-
-include_directories(include ${catkin_INCLUDE_DIRS} ${OpenCV_INCLUDE_DIRS} ${UTILS_PATH} ${G2O_INCLUDE_DIRS})
-
-add_library(map_manager src/mapmanager.cpp src/keyframe.cpp)
-
-add_executable(odometry src/odometry.cpp)
-target_link_libraries(odometry
-  map_manager g2o::core g2o::solver_cholmod g2o::types_sba
-  ${catkin_LIBRARIES} ${OpenCV_LIBRARIES})
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+find_package(ament_cmake REQUIRED)
+find_package(rclcpp REQUIRED)
+find_package(sensor_msgs REQUIRED)
+find_package(geometry_msgs REQUIRED)
+find_package(std_msgs REQUIRED)
+find_package(nav_msgs REQUIRED)
+find_package(cv_bridge REQUIRED)
+find_package(message_filters REQUIRED)
+find_package(pcl_conversions REQUIRED)
+find_package(Eigen3 REQUIRED)
+include_directories(include)
+find_package(OpenCV REQUIRED)
+include_directories(${OpenCV_INCLUDE_DIRS})
+find_package(PCL REQUIRED COMPONENTS common)
+include_directories(${PCL_INCLUDE_DIRS})
+# Pin the upstream optimizer; use Eigen so SuiteSparse/CUDA are not required.
+set(CMAKE_DISABLE_FIND_PACKAGE_SuiteSparse TRUE)
+set(CMAKE_DISABLE_FIND_PACKAGE_CSparse TRUE)
+set(CSPARSE_FOUND FALSE)
+set(CMAKE_DISABLE_FIND_PACKAGE_QGLViewer TRUE)
+include(FetchContent)
+foreach(flag G2O_BUILD_APPS G2O_BUILD_EXAMPLES G2O_BUILD_SLAM2D_TYPES
+    G2O_BUILD_SLAM3D_ADDON_TYPES G2O_BUILD_ICP_TYPES G2O_BUILD_SIM3_TYPES
+    G2O_USE_CHOLMOD G2O_USE_CSPARSE G2O_USE_OPENGL BUILD_UNITTESTS)
+  set(${flag} OFF CACHE BOOL "" FORCE)
+endforeach()
+FetchContent_Declare(g2o
+  URL https://codeload.github.com/RainerKuemmerle/g2o/tar.gz/e8df2004e07ea8f5b8e6a8b9f2dc067b45b45036
+  URL_HASH SHA256=be2c3c27a792db480ffb2d44eae5d6ce5d68ae3cb31dd6fe382d94626913a8fa)
+FetchContent_MakeAvailable(g2o)
+include_directories(${g2o_SOURCE_DIR} ${g2o_BINARY_DIR})
+add_executable(odometry src/odometry.cpp src/mapmanager.cpp src/keyframe.cpp)
+ament_target_dependencies(odometry rclcpp sensor_msgs geometry_msgs std_msgs nav_msgs cv_bridge message_filters pcl_conversions)
+target_link_libraries(odometry Eigen3::Eigen)
+target_link_libraries(odometry ${OpenCV_LIBS})
+target_link_libraries(odometry core types_sba ${PCL_LIBRARIES})
+install(TARGETS odometry DESTINATION lib/${PROJECT_NAME})
+install(DIRECTORY launch DESTINATION share/${PROJECT_NAME})
+ament_package()

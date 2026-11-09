@@ -1,39 +1,16 @@
-cmake_minimum_required(VERSION 3.0.2)
+cmake_minimum_required(VERSION 3.16)
 project(imu_gps_odometry)
 set(CMAKE_CXX_STANDARD 17)
-## Compile as C++11, supported in ROS Kinetic and newer
-# add_compile_options(-std=c++11)
-
-## Find catkin macros and libraries
-## if COMPONENTS list like find_package(catkin REQUIRED COMPONENTS xyz)
-## is used, also find other catkin packages
-find_package(catkin REQUIRED COMPONENTS
-airsim_ros
-message_generation
-nav_msgs
-roscpp
-rospy
-sensor_msgs
-std_msgs
-geographic_msgs
-geometry_msgs
-std_srvs
-tf2
-tf2_ros
-tf2_sensor_msgs
-tf2_geometry_msgs
-image_transport
-)
-
-catkin_package(
-  CATKIN_DEPENDS message_runtime roscpp std_msgs
-)
-
-set(UTILS_PATH ${PROJECT_SOURCE_DIR}/../utils)
-
-include_directories(include ${catkin_INCLUDE_DIRS} ${UTILS_PATH})
-
-
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+find_package(ament_cmake REQUIRED)
+find_package(rclcpp REQUIRED)
+find_package(geometry_msgs REQUIRED)
+find_package(sensor_msgs REQUIRED)
+find_package(nav_msgs REQUIRED)
+find_package(Eigen3 REQUIRED)
+include_directories(include)
 add_executable(imu_gps_odometry src/imu_gps_odometry.cpp src/eskf.cpp)
-target_link_libraries(imu_gps_odometry
-  ${catkin_LIBRARIES})
+ament_target_dependencies(imu_gps_odometry rclcpp geometry_msgs sensor_msgs nav_msgs)
+target_link_libraries(imu_gps_odometry Eigen3::Eigen)
+install(TARGETS imu_gps_odometry DESTINATION lib/${PROJECT_NAME})
+ament_package()

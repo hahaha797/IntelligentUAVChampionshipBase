@@ -1,45 +1,17 @@
-cmake_minimum_required(VERSION 3.0.2)
+cmake_minimum_required(VERSION 3.16)
 project(controller_test)
 set(CMAKE_CXX_STANDARD 17)
-## Compile as C++11, supported in ROS Kinetic and newer
-# add_compile_options(-std=c++11)
-
-## Find catkin macros and libraries
-## if COMPONENTS list like find_package(catkin REQUIRED COMPONENTS xyz)
-## is used, also find other catkin packages
-set(cv_bridge_DIR /usr/local/share/cv_bridge/cmake)
-set(pcl_conversions_DIR /usr/local/share/pcl_conversions/cmake)
-set(pcl_ros_DIR /usr/local/share/pcl_ros/cmake)
-find_package(catkin REQUIRED COMPONENTS
-airsim_ros
-message_generation
-nav_msgs
-# nodelet
-roscpp
-rospy
-sensor_msgs
-std_msgs
-geographic_msgs
-geometry_msgs
-std_srvs
-tf2
-tf2_ros
-tf2_sensor_msgs
-tf2_geometry_msgs
-image_transport
-cv_bridge
-pcl_conversions
-pcl_ros
-)
-
-find_package(OpenCV 4.10.0 EXACT)
-
-catkin_package(
-  CATKIN_DEPENDS message_runtime roscpp std_msgs
-)
-
-include_directories(include ${catkin_INCLUDE_DIRS} ${OpenCV_INCLUDE_DIRS})
-
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+find_package(ament_cmake REQUIRED)
+find_package(rclcpp REQUIRED)
+find_package(airsim_ros REQUIRED)
+find_package(geometry_msgs REQUIRED)
+find_package(nav_msgs REQUIRED)
+find_package(Eigen3 REQUIRED)
+include_directories(include)
 add_executable(controller_test src/controllerTest.cpp src/PDcontroller.cpp)
-target_link_libraries(controller_test
-  ${catkin_LIBRARIES} ${OpenCV_LIBRARIES})
+ament_target_dependencies(controller_test rclcpp airsim_ros geometry_msgs nav_msgs)
+target_link_libraries(controller_test Eigen3::Eigen)
+install(TARGETS controller_test DESTINATION lib/${PROJECT_NAME})
+install(DIRECTORY launch DESTINATION share/${PROJECT_NAME})
+ament_package()

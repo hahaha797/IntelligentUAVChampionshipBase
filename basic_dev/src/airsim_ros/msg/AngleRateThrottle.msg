@@ -1,4 +1,4 @@
-float64 rollRate
-float64 pitchRate
-float64 yawRate
+float64 roll_rate
+float64 pitch_rate
+float64 yaw_rate
 float64 throttle

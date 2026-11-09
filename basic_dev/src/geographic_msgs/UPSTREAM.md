@@ -1,0 +1,1 @@
+Vendored from https://github.com/ros-geographic-info/geographic_info/tree/f70b81a438172cd7a066dc1b18314d70e0eb6389/geographic_msgs (BSD). Included to build in the current Humble environment without system package changes.

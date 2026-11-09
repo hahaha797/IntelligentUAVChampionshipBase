@@ -1,0 +1,12 @@
+# Python 3.10 + /opt/ros/humble; retain Ubuntu's NumPy 1.x ABI for cv_bridge.
+numpy==1.24.4
+PyYAML>=6,<7
+websocket-client>=1.6,<2
+websockets>=12,<14
+empy==3.3.4
+catkin-pkg>=0.5,<2
+lark>=1.1,<2
+pytest>=6,<9
+colcon-common-extensions>=0.3,<0.4
+# Required by Ubuntu's inherited PyNaCl package; keep pip check clean.
+cffi>=1.15,<3

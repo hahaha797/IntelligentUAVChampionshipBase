@@ -5,13 +5,13 @@
 #include <pcl/point_cloud.h>
 #include <pcl/point_types.h>
 #include <pcl/common/transforms.h>
-#include <opencv2/cudastereo.hpp>
+#include <opencv2/calib3d.hpp>
 #include <g2o/core/sparse_optimizer.h>
 #include <g2o/core/block_solver.h>
 #include <g2o/core/robust_kernel.h>
 #include <g2o/core/robust_kernel_impl.h>
 #include <g2o/core/optimization_algorithm_levenberg.h>
-#include <g2o/solvers/cholmod/linear_solver_cholmod.h>
+#include <g2o/solvers/eigen/linear_solver_eigen.h>
 #include <g2o/types/slam3d/se3quat.h>
 #include <g2o/types/sba/types_six_dof_expmap.h>
 #include <thread>
@@ -33,11 +33,12 @@ public:
     //         std::vector<Eigen::Vector2d>& pointls, std::vector<Eigen::Vector2d>& pointrs, std::vector<Eigen::Vector3d>& point_3ds);
     pcl::PointCloud<pcl::PointXYZ> m_global_PCL;
     void startOptimal();
+    void optimizeWindow();
 private:
     void triangulatePointsOnCamLCurKF();
     void distortion(const Eigen::Vector2d &p_u, Eigen::Vector2d &d_u, bool is_caml) const;
     void liftProjective(const Eigen::Vector2d &p, Eigen::Vector3d &P, bool is_caml) const;
-    cv::Ptr<cv::cuda::StereoSGM> m_sgbm_ptr = cv::cuda::createStereoSGM(0, 64, 10, 120, 15);
+    cv::Ptr<cv::StereoSGBM> m_sgbm_ptr = cv::StereoSGBM::create(0, 64, 5, 8*25, 32*25, 1, 0, 15);
     int m_KFCount=0; //use to set kf id;
     int m_curKFIdx=0;//当前使用中的kf
     Eigen::Matrix4d m_Cam_Trl;

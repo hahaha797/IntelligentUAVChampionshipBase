@@ -6,7 +6,7 @@ MapManager::MapManager()
     m_optimizer_ptr = std::make_unique<g2o::SparseOptimizer>();
     g2o::OptimizationAlgorithmLevenberg* solver;
     solver = new g2o::OptimizationAlgorithmLevenberg(
-        std::make_unique<g2o::BlockSolver_6_3>(std::make_unique<g2o::LinearSolverCholmod<g2o::BlockSolver_6_3::PoseMatrixType>>()));
+        std::make_unique<g2o::BlockSolver_6_3>(std::make_unique<g2o::LinearSolverEigen<g2o::BlockSolver_6_3::PoseMatrixType>>()));
     m_optimizer_ptr->setAlgorithm(solver);
     m_optimizer_ptr->setVerbose(false);
     std::cout<<"Create Mapmanager success.\n";
@@ -25,64 +25,54 @@ void MapManager::startOptimal()
         m_CamL_Intrinsic(1, 2)), 0 );
     camera->setId(0);
     m_optimizer_ptr->addParameter( camera );
-    std::thread t = std::thread([this](){
-        while(1)
-        {
-            std::this_thread::sleep_for(std::chrono::milliseconds(200));
-            if(m_keyframes.size()==0)
-            {
-                std::this_thread::sleep_for(std::chrono::milliseconds(10));
-                continue;
-            }
-            m_optimizer_ptr->clear();
-            int start = 0;
-            int end = m_keyframes.size() - 1;
-            if(m_keyframes.size()<10)start = 0;
-            else start = m_keyframes.size() - 10;
-            std::vector<g2o::VertexSE3Expmap*> vcs;
-            std::vector<g2o::EdgeProjectXYZ2UV*> edges;
-            
-            for(int i = start ; i < m_keyframes.size(); i++)
-            {
-                g2o::VertexSE3Expmap* vc = new g2o::VertexSE3Expmap();
-                vcs.emplace_back(vc);
-                vc->setId(i);
-                // m_Vertex_Cnt ++;
-                std::cout<<m_keyframes[i].m_Tc0ccur<<std::endl;
-                vc->setEstimate(g2o::SE3Quat(m_keyframes[i].m_Tc0ccur.block(0, 0, 3, 3), m_keyframes[i].m_Tc0ccur.topRightCorner<3, 1>()));
-                // if(i == start)vc->setFixed(true);
-                m_optimizer_ptr->addVertex(vc);
-                for(int j = 0 ;j < m_keyframes[i].m_kf_feats_l.size(); j ++)
-                {
-                    int idx = m_keyframes[i].m_kf_feats_l[j].corespondPCLIdx;
-                    if(idx == -1)continue;
-                    g2o::VertexPointXYZ* vp = new g2o::VertexPointXYZ();
-                    vp->setId(j+i*j);
-                    pcl::PointXYZ p = m_global_PCL[idx];
-                    vp->setEstimate(Eigen::Vector3d(p.x, p.y, p.z));
-                    vp->setFixed(true);
-                    vp->setMarginalized(true);
-                    m_optimizer_ptr->addVertex(vp);
-                    g2o::EdgeProjectXYZ2UV* edge = new g2o::EdgeProjectXYZ2UV();
-                    edge->setInformation(Eigen::Matrix2d::Identity());
-                    edge->setMeasurement(m_keyframes[i].m_kf_feats_l[j].ptl);
-                    edge->setVertex(0, dynamic_cast<g2o::VertexPointXYZ*>(vp));
-                    edge->setVertex(1, dynamic_cast<g2o::VertexSE3Expmap*>(vc));
-                    edge->setRobustKernel(new g2o::RobustKernelHuber());
-                    edge->setParameterId(0, 0);
-                    m_optimizer_ptr->addEdge(edge);
-                    edges.push_back(edge);
-                }
-            }
+}
 
-            m_optimizer_ptr->initializeOptimization();
-            m_optimizer_ptr->optimize(6);
-            // std::cout<<"vcs size: "<<vcs.size()<<std::endl;
-            std::cout<<"backend:\n"<<vcs[0]->estimate().rotation().matrix()<<"\n"<<vcs[0]->estimate().translation()<<std::endl;
-            // }
+void MapManager::optimizeWindow()
+{
+    if (m_keyframes.empty()) return;
+    m_optimizer_ptr->clear();
+    int start = 0;
+    if(m_keyframes.size()<10)start = 0;
+    else start = m_keyframes.size() - 10;
+    int point_id = static_cast<int>(m_keyframes.size());
+    std::vector<g2o::VertexSE3Expmap*> vcs;
+    std::vector<g2o::EdgeProjectXYZ2UV*> edges;
+
+    for(int i = start ; i < m_keyframes.size(); i++)
+    {
+        g2o::VertexSE3Expmap* vc = new g2o::VertexSE3Expmap();
+        vcs.emplace_back(vc);
+        vc->setId(i);
+        // m_Vertex_Cnt ++;
+        vc->setEstimate(g2o::SE3Quat(m_keyframes[i].m_Tc0ccur.block(0, 0, 3, 3), m_keyframes[i].m_Tc0ccur.topRightCorner<3, 1>()));
+        // if(i == start)vc->setFixed(true);
+        m_optimizer_ptr->addVertex(vc);
+        for(int j = 0 ;j < m_keyframes[i].m_kf_feats_l.size(); j ++)
+        {
+            int idx = m_keyframes[i].m_kf_feats_l[j].corespondPCLIdx;
+            if(idx == -1)continue;
+            g2o::VertexPointXYZ* vp = new g2o::VertexPointXYZ();
+            vp->setId(point_id++);
+            pcl::PointXYZ p = m_global_PCL[idx];
+            vp->setEstimate(Eigen::Vector3d(p.x, p.y, p.z));
+            vp->setFixed(true);
+            vp->setMarginalized(true);
+            m_optimizer_ptr->addVertex(vp);
+            g2o::EdgeProjectXYZ2UV* edge = new g2o::EdgeProjectXYZ2UV();
+            edge->setInformation(Eigen::Matrix2d::Identity());
+            edge->setMeasurement(m_keyframes[i].m_kf_feats_l[j].ptl);
+            edge->setVertex(0, dynamic_cast<g2o::VertexPointXYZ*>(vp));
+            edge->setVertex(1, dynamic_cast<g2o::VertexSE3Expmap*>(vc));
+            edge->setRobustKernel(new g2o::RobustKernelHuber());
+            edge->setParameterId(0, 0);
+            m_optimizer_ptr->addEdge(edge);
+            edges.push_back(edge);
         }
-    });
-    t.detach();
+    }
+
+    m_optimizer_ptr->initializeOptimization();
+    m_optimizer_ptr->optimize(6);
+    // }
 }
 
 void MapManager::insertKF(KeyFrame& kf)
@@ -116,6 +106,7 @@ void MapManager::updateFrame(cv::Mat& img,  cv::Mat& img_bgr, std::vector<RealTi
 
 void MapManager::updateUsefulRTFrame(Eigen::Vector3d& gps_position, long long timecode)
 {
+    if (m_keyframes.empty()) return;
     m_keyframes[m_curKFIdx].m_rtf_mtx.lock();
     RTFrame f;
     f.gps_position = gps_position;
@@ -199,13 +190,8 @@ void MapManager::triangulatePointsOnCamLCurKF()
 {
     // auto t_a = std::chrono::high_resolution_clock::now();
     cv::Mat disparity_sgbm(m_keyframes[m_curKFIdx].m_img_l.size(), CV_16S);
-    cv::cuda::GpuMat cudaDisparityMap(m_keyframes[m_curKFIdx].m_img_l.size(), CV_16S);
-    cv::cuda::GpuMat cudaDrawColorDisparity(m_keyframes[m_curKFIdx].m_img_l.size(), CV_8UC4);
-    cv::cuda::GpuMat cudaLeftFrame, cudaRightFrame;
-    cudaLeftFrame.upload(m_keyframes[m_curKFIdx].m_img_l);
-    cudaRightFrame.upload(m_keyframes[m_curKFIdx].m_img_r);
-    m_sgbm_ptr->compute(cudaLeftFrame, cudaRightFrame, cudaDisparityMap);
-    cudaDisparityMap.download(disparity_sgbm);
+    m_sgbm_ptr->compute(m_keyframes[m_curKFIdx].m_img_l,
+                        m_keyframes[m_curKFIdx].m_img_r, disparity_sgbm);
     // Eigen::Matrix4d Tl = Eigen::Matrix4d::Identity();
     cv::Mat disparity;
     disparity_sgbm.convertTo(disparity, CV_32F, 1.0 / 16.0f);
@@ -218,7 +204,7 @@ void MapManager::triangulatePointsOnCamLCurKF()
         double ptl_x = m_keyframes[m_curKFIdx].m_kf_feats_l[i].ptl.x();
         double ptl_y = m_keyframes[m_curKFIdx].m_kf_feats_l[i].ptl.y();
         double depth = 0.301922 * 833.8 / disparity.at<float>(ptl_y, ptl_x);
-        if(depth > 50 || depth < 0.1)continue;
+        if(!std::isfinite(depth) || depth > 50 || depth < 0.1)continue;
         // std::cout<<"disp: "<<disparity.at<float>(ptl_y, ptl_x)<<" depth: "<<depth<<std::endl;
         Eigen::Vector4d p3d;
         p3d[0] = (ptl_x - m_CamL_Intrinsic(0, 2)) / m_CamL_Intrinsic(0, 0) * depth;

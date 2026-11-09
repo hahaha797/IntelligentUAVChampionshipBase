@@ -1,16 +1,11 @@
-#include <ros/ros.h>
-#include <image_transport/image_transport.h>
-#include "airsim_ros/VelCmd.h"
-#include "airsim_ros/PoseCmd.h"
-#include "airsim_ros/Takeoff.h"
-#include "airsim_ros/Land.h"
-#include "airsim_ros/GPSYaw.h"
-#include "nav_msgs/Odometry.h"
-#include "sensor_msgs/Imu.h"
-#include <geometry_msgs/PoseStamped.h>
+#include <rclcpp/rclcpp.hpp>
+
+#include "nav_msgs/msg/odometry.hpp"
+#include "sensor_msgs/msg/imu.hpp"
+#include <geometry_msgs/msg/pose_stamped.hpp>
 #include <time.h>
 #include <stdlib.h>
-#include <opencv2/cudaoptflow.hpp>
+
 #include <cv_bridge/cv_bridge.h>
 #include <opencv2/opencv.hpp>
 #include <message_filters/subscriber.h>
@@ -33,7 +28,7 @@
 #include <g2o/core/robust_kernel.h>
 #include <g2o/core/robust_kernel_impl.h>
 #include <g2o/core/optimization_algorithm_levenberg.h>
-#include <g2o/solvers/cholmod/linear_solver_cholmod.h>
+#include <g2o/solvers/eigen/linear_solver_eigen.h>
 #include <g2o/types/slam3d/se3quat.h>
 #include <g2o/types/sba/types_six_dof_expmap.h>
 #include "mapmanager.hpp"
@@ -128,15 +123,15 @@ std::random_device rd{};
 std::mt19937 gen{rd()};
 std::normal_distribution<double> gauss_dist{0.0, 1.0};
 bool g_insert_KF=false;
-ros::Publisher g_img_publisher;
-ros::Publisher g_cur_pcl_publisher;
-ros::Publisher g_local_map_pcl_publisher;
+rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr g_img_publisher;
+rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr g_cur_pcl_publisher;
+rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr g_local_map_pcl_publisher;
 
 void estimatePoseOnly(Eigen::Matrix4d& origin_T_c1c0, Eigen::Matrix4d& opt_T_c1c0, std::vector<Eigen::Vector3d>& last_cam_frame_points, 
     std::vector<Eigen::Vector2d>& cur_frame_pts);
-void odom_local_ned_cb(const geometry_msgs::PoseStamped::ConstPtr& msg);
-void imu_cb(const sensor_msgs::Imu::ConstPtr& msg);
-void front_left_view_cb(const sensor_msgs::ImageConstPtr& msg);
-void front_left_view_cb(const sensor_msgs::ImageConstPtr& msg);
-void front_right_view_cb(const sensor_msgs::ImageConstPtr& msg);
-void front_stereo_view_cb(const sensor_msgs::ImageConstPtr& fl_img, const sensor_msgs::ImageConstPtr& fr_img);
+void odom_local_ned_cb(const geometry_msgs::msg::PoseStamped::ConstSharedPtr& msg);
+void imu_cb(const sensor_msgs::msg::Imu::ConstSharedPtr& msg);
+void front_left_view_cb(const sensor_msgs::msg::Image::ConstSharedPtr& msg);
+void front_left_view_cb(const sensor_msgs::msg::Image::ConstSharedPtr& msg);
+void front_right_view_cb(const sensor_msgs::msg::Image::ConstSharedPtr& msg);
+void front_stereo_view_cb(const sensor_msgs::msg::Image::ConstSharedPtr& fl_img, const sensor_msgs::msg::Image::ConstSharedPtr& fr_img);

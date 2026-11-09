@@ -2,27 +2,26 @@
 
 int main(int argc, char** argv)
 {
-    ros::init(argc, argv, "controller_test"); // 初始化ros 节点，命名为 basic
-    ros::NodeHandle n; // 创建node控制句柄
+    rclcpp::init(argc, argv);
+    auto n = std::make_shared<rclcpp::Node>("controller_test");
     //无人机信息通过如下命令订阅，当收到消息时自动回调对应的函数
-    g_takeoff_client = n.serviceClient<airsim_ros::Takeoff>("/airsim_node/drone_1/takeoff");
-    g_pwm_publisher = n.advertise<airsim_ros::RotorPWM>("/airsim_node/drone_1/rotor_pwm_cmd", 1);
-    ros::Subscriber odom_suber = n.subscribe<nav_msgs::Odometry>("/eskf_odom", 1, odom_cb);
-    // ros::Subscriber gt_suber = n.subscribe<geometry_msgs::PoseStamped>("/airsim_node/drone_1/debug/pose_gt", 1, gt_cb);
-    ros::Subscriber init_pose_suber = n.subscribe<geometry_msgs::PoseStamped>("/airsim_node/initial_pose", 1, init_pose_cb);
-    ros::Subscriber end_pose_suber = n.subscribe<geometry_msgs::PoseStamped>("/airsim_node/end_goal", 1, end_position_cb);
-    airsim_ros::Takeoff  tf_cmd;
-    tf_cmd.request.waitOnLastTask = 1;
+    g_takeoff_client = n->create_client<airsim_ros::srv::Takeoff>("/airsim_node/drone_1/takeoff");
+    g_pwm_publisher = n->create_publisher<airsim_ros::msg::RotorPWM>("/airsim_node/drone_1/rotor_pwm_cmd", 10);
+    auto odom_suber = n->create_subscription<nav_msgs::msg::Odometry>("/eskf_odom", rclcpp::SensorDataQoS(), odom_cb);
+    // auto gt_suber = n->create_subscription<geometry_msgs::msg::PoseStamped>("/airsim_node/drone_1/debug/pose_gt", rclcpp::SensorDataQoS(), gt_cb);
+    auto init_pose_suber = n->create_subscription<geometry_msgs::msg::PoseStamped>("/airsim_node/initial_pose", rclcpp::QoS(1).transient_local(), init_pose_cb);
+    auto end_pose_suber = n->create_subscription<geometry_msgs::msg::PoseStamped>("/airsim_node/end_goal", rclcpp::QoS(1).transient_local(), end_position_cb);
+    auto tf_cmd = std::make_shared<airsim_ros::srv::Takeoff::Request>();
+    tf_cmd->wait_on_last_task = true;
     // g_takeoff_client.call(tf_cmd);
-    ros::Rate loop_rate(200);
-    while(ros::ok()){
-        ros::spinOnce();
-        loop_rate.sleep();
-    }
+    rclcpp::spin(n);
+    g_pwm_publisher.reset();
+    g_takeoff_client.reset();
+    rclcpp::shutdown();
     return 0;
 }
 
-void init_pose_cb(const geometry_msgs::PoseStamped::ConstPtr& msg)
+void init_pose_cb(const geometry_msgs::msg::PoseStamped::ConstSharedPtr& msg)
 {
     Eigen::Quaternion Q(msg->pose.orientation.w, msg->pose.orientation.x, msg->pose.orientation.y, msg->pose.orientation.z);
     Eigen::Matrix3d rotationM = Q.normalized().toRotationMatrix();
@@ -37,7 +36,7 @@ void init_pose_cb(const geometry_msgs::PoseStamped::ConstPtr& msg)
     get_init_pose = true;
 }
 
-void end_position_cb(const geometry_msgs::PoseStamped::ConstPtr& msg)
+void end_position_cb(const geometry_msgs::msg::PoseStamped::ConstSharedPtr& msg)
 {
     Pwend = Eigen::Vector3d(msg->pose.position.x, msg->pose.position.y, msg->pose.position.z);
     // std::cout<<"end pos: "<<Pwend.transpose()<<std::endl;
@@ -60,7 +59,7 @@ void end_position_cb(const geometry_msgs::PoseStamped::ConstPtr& msg)
             {
                 for(int i = 0; i < ps.size(); i++)
                 {
-                    globalPath.emplace_back(ps[ps.size()-i]);
+                    globalPath.emplace_back(ps[ps.size()-1-i]);
                 }
                 break;
             }
@@ -69,7 +68,7 @@ void end_position_cb(const geometry_msgs::PoseStamped::ConstPtr& msg)
     }
 }
 
-void odom_cb(const nav_msgs::Odometry::ConstPtr& msg)
+void odom_cb(const nav_msgs::msg::Odometry::ConstSharedPtr& msg)
 {
     cb_cnt ++;
     if(cb_cnt / 100 < 10)return;
@@ -108,15 +107,15 @@ void odom_cb(const nav_msgs::Odometry::ConstPtr& msg)
         phi, theta, psi, Wflu.x(), Wflu.y(), Wflu.z();
     X_des << 1.0, 1.0, 0.5, 0, 0, 0, 0, 0, 0, 0, 0, 0;
     Eigen::Vector4f output = g_PDcontroller.execute( X_des, X_real);
-    airsim_ros::RotorPWM pwm_cmd;
-    pwm_cmd.rotorPWM0 = output[0];
-    pwm_cmd.rotorPWM1 = output[1];
-    pwm_cmd.rotorPWM2 = output[2];
-    pwm_cmd.rotorPWM3 = output[3];
-    // // std::cout<<pwm_cmd.rotorPWM0<<" "<<pwm_cmd.rotorPWM1<<" "<<pwm_cmd.rotorPWM2<<" "<<pwm_cmd.rotorPWM3<<" "<<std::endl;
+    airsim_ros::msg::RotorPWM pwm_cmd;
+    pwm_cmd.rotor_pwm0 = output[0];
+    pwm_cmd.rotor_pwm1 = output[1];
+    pwm_cmd.rotor_pwm2 = output[2];
+    pwm_cmd.rotor_pwm3 = output[3];
+    // // std::cout<<pwm_cmd.rotor_pwm0<<" "<<pwm_cmd.rotor_pwm1<<" "<<pwm_cmd.rotor_pwm2<<" "<<pwm_cmd.rotor_pwm3<<" "<<std::endl;
     if(X_real[0]<3.0)
     {
-        g_pwm_publisher.publish(pwm_cmd);
+        g_pwm_publisher->publish(pwm_cmd);
     }else
     {
         if(trigger_port > 12)

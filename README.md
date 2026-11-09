@@ -1,120 +1,127 @@
-# __自主无人机竞速基本开发教程__
-## 1. 启动模拟器 
-参考 ***https://github.com/RoboMaster/IntelligentUAVChampionshipSimulator/tree/RMUA2026-01*** 配置好模拟器并启动
+# RMUA2026 — ROS 2 Humble 开发环境（ysy）
 
-## 2. 安装Nvidia-Docker
->确保已安装了 Nvidia 驱动
-----
->安装docker
->+ `sudo apt-get install ca-certificates gnupg lsb-release`
->+ `sudo mkdir -p /etc/apt/keyrings`
->+ `curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg`
->+ `echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null`
->+ `sudo apt-get update`
->+ `sudo apt-get install docker-ce docker-ce-cli containerd.io docker-compose-plugin`
-----
->安装nvidia-container-toolkit
->+ `distribution=$(. /etc/os-release;echo $ID$VERSION_ID)`
->+ `curl -s -L https://nvidia.github.io/nvidia-docker/gpgkey | sudo apt-key add -`
->+ `curl -s -L https://nvidia.github.io/nvidia-docker/$distribution/nvidia-docker.list | sudo tee /etc/apt/sources.list.d/nvidia-docker.list`
->+ `sudo apt-get update && sudo apt-get install -y nvidia-container-toolkit`
->+ `sudo systemctl restart docker`
----
->设置用户组，消除 *sudo* 限制  
->+ `sudo groupadd docker`  
->+ `sudo gpasswd -a $USER docker`  
->+ 注销账户并重新登录使新的用户组生效
->+ sudo service docker restart
+目标环境：Ubuntu 22.04、ROS 2 Humble、系统 Python 3.10。两个仓库并排位于 UAV 目录。
+原版说明保留在 [README_ROS1.md](README_ROS1.md)，其中 Noetic/catkin 命令仅适用于历史版本。
 
-## 3. 安装ROS-Noetic 
->+ `sudo sh -c 'echo "deb http://packages.ros.org/ros/ubuntu $(lsb_release -sc) main" > /etc/apt/sources.list.d/ros-latest.list'`   
->+ `sudo apt install curl `  
->+ `curl -s https://raw.githubusercontent.com/ros/rosdistro/master/ros.asc | sudo apt-key add -`   
->+ `sudo apt update`
->+ `sudo apt install ros-noetic-desktop-full`
->+ `sudo apt install python3-catkin-tools`
+两仓库统一使用入口见 [UAV 工作区说明](docs/WORKSPACE.md)。
 
-## 4. 基于docker镜像的控制程序开发流程
-本次比赛中的模拟器使用 ***ROS*** 进行通讯，选手需要编写含有控制程序的ros功能包操控无人机完成目标,该ros功能包需要封装在docker镜像中进行提交。建议先在主机下开发完相应程序后在进行程序的docker封装，流程如下
->进入文件目录  
-`cd /path/to/IntelligentUAVChampionshipBase/basic_dev`  
->开发案例完成功能设计与程序开发并根据需要修改 _Dockerfile_ 后，构建镜像   
-`docker build -t basic_dev .`      
->导出镜像  
-`docker image save [镜像：TAG] > test.tar`    
-在主机工作目录下会出现 test.tar 文件，该文件即为可提交镜像  
-### 注意:  
-1. 服务器会在外部随机分配ip给容器，不能在镜像中的启动文件中提供 *ROS_IP* 和 *ROS_MASTER_URI* 这两个环境变量，否则服务器与容器将无法连接     
-2. 镜像中的程序应在镜像启动后自动开启    
-3. 镜像程序不允许使用GUI(X11等)功能        
+详细步骤见 [环境配置与维护](docs/ENVIRONMENT.md)，仿真运行见 [Simulator 操作说明](../IntelligentUAVChampionshipSimulator/docs/OPERATIONS.md)。
 
+## 构建和运行
 
-## 5. 程序案例
-### 基础开发环境(basic_dev)
-#### 简介
-该镜像包含有ros-noetic-desktop-focal以及相关的必要ros组件。程序中展示了如何模拟器进行数据交互
-#### 使用说明
->进入文件目录    
-`cd /path/to/IntelligentUAVChampionshipBase/basic_dev`  
->构建镜像   
-`docker build -t basic_dev .`  
->启动docker镜像   
-`./run_basic_dev.sh`  
->当看到如下图，说明容器启动成功，程序可接受到模拟器传出的数据
-![pic](./docs/1.png)
+```bash
+export UAV_ROOT=/home/pk620/桌面/UAV  # 其他机器请修改此路径
+cd "$UAV_ROOT/IntelligentUAVChampionshipBase/basic_dev"
+./scripts/setup_venv.sh
+./build_ros2.sh
+source env_ros2.bash
+ros2 run basic_dev basic_dev
+```
 
-## ros数据交互  
->用于获取数据的可订阅的主题  
->+ 前视相机   
-`/airsim_node/drone_1/front_left/Scene`  
-`/airsim_node/drone_1/front_right/Scene`
->+ 后视相机  
-`/airsim_node/drone_1/back_left/Scene`  
-`/airsim_node/drone_1/back_right/Scene`  
->+ imu数据  
-`/airsim_node/drone_1/imu/imu`
->+ 雷达数据  
-`/airsim_node/drone_1/lidar`
->+ 无人机状态真值  
-`/airsim_node/drone_1/debug/pose_gt`  
->+ gps数据(含带误差姿态)  
-`/airsim_node/drone_1/gps`  
->+ 电机输入PWM信号(0:右前, 1:左后, 2:左前, 3:右后)  
-`/airsim_node/drone_1/debug/rotor_pwm`  
->+ 起始位姿  
-`/airsim_node/initial_pose`  
->+ 终点位置  
-`/airsim_node/end_goal`  
----- 
->用于发送指令的主题
->+ 速度控制(该主题通信需自行开发，开发所需文件可查阅模拟器中的VelCmdmsg文件夹)  
-`/airsim_node/drone_1/vel_body_cmd`
->+ PWM控制(0:右前, 1:左后, 2:左前, 3:右后)  
-`/airsim_node/drone_1/rotor_pwm_cmd`
-----
->可用服务   
->+ 起飞   
-`/airsim_node/drone_1/takeoff`   
->+ 降落   
-`/airsim_node/drone_1/land`   
->+ 重置   
-`/airsim_node/reset` 
-### 注意:   
-1. 服务器仅开放规则手册中提及的话题,其余话题仅供调试程序使用。
-2. 案例中不包含速度控制ros通信，需要自行开发，开发所需文件可查阅模拟器中的VelCmdmsg文件夹
+只需创建或更新 Python 环境时（首次安装系统依赖的顺序见环境配置文档）：
 
-## 系统相关参数
-> 无人机系统参数  
->+ 质量 0.9kg    
->+ 轴距（电机至机体中心）0.18米  
->+ 转动惯量 Ixx 0.0046890742, Iyy 0.0069312, Izz 0.010421166  
->+ 电机升力系数 0.000367717  
->+ 电机反扭力系数 4.888486266072161e-06  
->+ 最大转速 11079.03 转每分钟  
-----
-> 标定板参数
->+ 行数（内点）8  
->+ 列数（内点）11  
->+ 方块边长 0.06 米  
+```bash
+cd "$UAV_ROOT/IntelligentUAVChampionshipBase/basic_dev"
+./scripts/setup_venv.sh
+source env_ros2.bash
+python -c "import rclpy, cv2, cv_bridge; print('环境正常')"
+```
 
+`.venv` 位于 UAV 根目录，使用系统 Python 3.10 和 `--system-site-packages` 访问 ROS 2 系统库。
+`env_ros2.bash` 自动激活它并关闭用户 site-packages，避免 Conda 及 `~/.local` 中 NumPy 2.x
+污染 Humble/OpenCV。NumPy 固定为 1.24.4，依赖声明在 `requirements-humble.txt`，
+本次实际安装版本记录在 `requirements-humble.lock.txt`。重新安装相同版本可执行
+`python -m pip install -r requirements-humble.lock.txt`。
 
+`build_ros2.sh` 优先使用项目 `.venv`，未创建时使用系统 Python。由于 Humble 的
+rosidl/CMake 不能正确读取含中文路径的生成接口列表，build/install/log 存放在
+`$HOME/.cache/rmua2026-ros2`，源码仍在当前仓库。可用 `UAV_ROS2_CACHE` 指定其他**英文路径**，
+构建和运行时需保持一致。`env_ros2.bash` 保留已有 `ROS_DOMAIN_ID`（本机为 20），各进程应使用相同值。
+
+Docker、GPU runtime 和系统开发依赖可通过同目录下的安装脚本配置：
+
+```bash
+cd "$UAV_ROOT/IntelligentUAVChampionshipBase/basic_dev"
+sudo bash scripts/install_system_deps.sh "$USER"
+```
+
+脚本使用 Docker 和 NVIDIA 官方软件源，安装 Engine、Compose、Buildx、NVIDIA Container Toolkit、
+venv/colcon/rosdep/vcstool 和项目系统依赖，启用 Docker 服务、配置 GPU runtime，并运行容器检查。
+日志：`/var/log/uav-environment-install.log`。首次加入 docker 组后需注销再登录，或在新终端执行
+`newgrp docker`。脚本不升级 NVIDIA 驱动，也不删除已有的容器引擎。管理员认证必须在本机完成。
+
+安装后检查：`./scripts/check_environment.sh`。
+如果仅缺少开发依赖，也可单独安装：
+
+```bash
+sudo apt install build-essential cmake git python3-colcon-common-extensions \
+  ros-humble-cv-bridge ros-humble-message-filters ros-humble-pcl-conversions \
+  libopencv-dev libeigen3-dev libpcl-dev python3-websocket python3-yaml
+```
+
+仓库内包含上游 `geographic_msgs` 源码及来源说明；g2o 首次构建自动下载固定提交的源码并校验
+SHA256。视觉里程计保留 g2o 优化流程，改用 Eigen 求解器和 OpenCV CPU StereoSGBM，
+不依赖自编译 CUDA OpenCV、写死的 `/usr/local` 路径或 SuiteSparse。
+若相邻 Simulator 仓库存在，构建脚本同时构建 `rmua_simulator_bridge`。
+
+## 功能包
+
+| 包 | 用途 | 命令 |
+| --- | --- | --- |
+| airsim_ros | ROS 2 消息和服务 | `ros2 interface list` |
+| geographic_msgs | ROS 2 地理消息依赖 | 参见包内 `UPSTREAM.md` |
+| basic_dev | 订阅图像、IMU、GPS、点云和真值的基础示例 | `ros2 run basic_dev basic_dev` |
+| imu_gps_odometry | IMU/GPS ESKF，输出 `/eskf_odom` | `ros2 run imu_gps_odometry imu_gps_odometry` |
+| controller_test | 原 PWM 控制器示例 | `ros2 launch controller_test controller_test.launch.py` |
+| odometry | 双目/IMU视觉里程计实验示例 | `ros2 launch odometry odometry.launch.py` |
+| rmua_simulator_bridge | 官方 ROS 1 二进制与 ROS 2 通信适配 | 见相邻 Simulator 仓库 |
+
+控制器 launch 同时启动 ESKF，接收初始位姿后，根据原示例逻辑在收到 1000 次里程计回调后开始
+输出 PWM，目标仍是初始机体系下 `(1, 1, 0.5)`。这不是完整的竞速导航程序。
+视觉里程计使用上游的相机标定参数，CPU 替换后的实时性能和飞行精度仍需真实场景验证。
+RViz2 配置位于 `basic_dev/src/odometry/launch/config.rviz`，可用 `rviz2 -d <配置路径>` 打开。
+消息坐标保持模拟器的 NED 约定；不会隐式改成 ENU。里程计 frame 为 `world_ned`、`drone_1_ned`。
+
+## 2026 速度和 PWM 接口
+
+以模拟器仓库提供的 VelCmd 为准，已修正 Base 原版仅有 `Twist` 的过期定义。
+
+```bash
+ros2 topic pub --once /airsim_node/drone_1/vel_body_cmd airsim_ros/msg/VelCmd \
+  '{vx: 0.0, vy: 0.0, vz: 0.0, yaw_rate: 0.0, va: 4, stop: 1}'
+ros2 service call /airsim_node/drone_1/takeoff airsim_ros/srv/Takeoff \
+  '{wait_on_last_task: true}'
+```
+
+`va` 是加速度（官方上限 8 m/s²），`stop=1` 表示急停。`yaw_rate` 延续官方角速度单位。
+ROS 2 字段使用 snake_case：`yaw_rate`、`rotor_pwm0..3`、`wait_on_last_task`；
+适配层映射到二进制原有的 `yawRate`、`rotorPWM0..3`、`waitOnLastTask`。
+Base 节点的 IMU/GPS/点云订阅使用 SensorDataQoS；图像订阅使用 Reliable（深度 2），避免当前环境中大图像分片丢失。
+适配层遥测发布端统一使用 Reliable（深度 1），可与上述两类订阅者匹配。
+初始位姿和终点采用 transient_local，支持后启动的节点。
+
+## 容器
+
+```bash
+cd "$UAV_ROOT/IntelligentUAVChampionshipBase/basic_dev"
+export ROS_DOMAIN_ID=20  # 与适配层及其他节点保持一致
+docker build -t basic_dev:humble .
+./run_basic_dev.sh
+```
+
+开发容器基于 Humble/Jammy，默认运行基础示例；可向 `run_basic_dev.sh` 传入其他 ROS 2 命令。
+模拟器二进制保留在独立 Noetic 容器，宿主机无需安装 ROS 1。
+
+## 验证
+
+```bash
+cd "$UAV_ROOT/IntelligentUAVChampionshipBase"
+source basic_dev/env_ros2.bash
+# 集成测试额外依赖，生产运行不需要 websockets 服务端库
+python -m pip install 'websockets>=12,<14'
+python basic_dev/tests/test_ros2_runtime.py
+```
+
+集成测试使用本地模拟 rosbridge 端点，验证时间戳/二进制图像转换、初始位姿保留、速度/PWM、
+起飞服务和断线重连；同时运行 ESKF、控制器及视觉/基础节点，检查输出、合成双目图像处理和启动退出。
+它不替代官方模拟器、GPU 容器和真实赛道上的闭环测试。
